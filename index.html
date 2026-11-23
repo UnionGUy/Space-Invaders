@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>SpAcE iNvAdErZ (Bootleg Edition)</title>
+<style>
+  body {
+    background: #ffff00;
+    color: #ff00ff;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    justify-content: center;
+    height: 100vh;
+    margin: 0;
+    font-family: "Comic Sans MS", "Chalkboard SE", cursive, sans-serif;
+  }
+  canvas {
+    background: #1a0033;
+    border: 8px dashed #00ff00;
+    transform: rotate(-1.5deg);
+  }
+  h2 { margin: 5px; text-shadow: 2px 2px #00ffff; }
+  p { margin: 5px; font-weight: bold; }
+</style>
+</head>
+<body>
+
+<h2>~*~ SpAcE iNvAdErZ ~*~</h2>
+<canvas id="game" width="550" height="450"></canvas>
+<p>A/D or Arrows = wobble | SPACE = shoot (maybe) | R = try again</p>
+
+<script>
+const canvas = document.getElementById('game');
+const ctx = canvas.getContext('2d');
+
+// Terrible Web Audio synthesizer
+let audioCtx;
+function badSound(freq, type, duration) {
+  if (!audioCtx) audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+  const osc = audioCtx.createOscillator();
+  const gain = audioCtx.createGain();
+  osc.type = type;
+  osc.frequency.setValueAtTime(freq, audioCtx.currentTime);
+  osc.frequency.linearRampToValueAtTime(freq * 0.4, audioCtx.currentTime + duration);
+  gain.gain.setValueAtTime(0.15, audioCtx.currentTime);
+  gain.gain.exponentialRampToValueAtTime(0.01, audioCtx.currentTime + duration);
+  osc.connect(gain);
+  gain.connect(audioCtx.destination);
+  osc.start();
+  osc.stop(audioCtx.currentTime + duration);
+}
+
+let score = 0;
+let gameOver = false;
+let win = false;
+let frame = 0;
+
+// Slippery ship with momentum
+const player = { x: 250, y: 390, vx: 0, w: 45, h: 25 };
+let bullets = [];
+let enemyBullets = [];
+let enemies = [];
+let enemyDir = 1;
+
+const keys = {};
+document.addEventListener('keydown', e => {
+  keys[e.code] = true;
+  if (e.code === 'Space' && !gameOver) shoot();
+  if (e.code === 'KeyR' && gameOver) resetGame();
+});
+document.addEventListener('keyup', e => keys[e.code] = false);
+
+function initEnemies() {
+  enemies = [];
+  const faces = ['>:-(', 'O_o', 'x_x', '@_@', 'UwU'];
+  for (let row = 0; row < 3; row++) {
+    for (let col = 0; col < 6; col++) {
+      enemies.push({
+        x: 40 + col * 75 + (Math.random() * 15),
+        y: 45 + row * 45,
+        w: 44,
+        h: 26,
+        face: faces[(row + col) % faces.length],
+        alive: true
+      });
+    }
+  }
+}
+
+function shoot() {
+  // 20% chance the gun jams
+  if (Math.random() < 0.2) {
+    badSound(90, 'sawtooth', 0.15);
+    return;
+  }
+  badSound(320 + Math.random() * 150, 'square', 0.12);
+  bullets.push({
+    x: player.x + player.w / 2,
+    y: player.y,
+    drift: (Math.random() - 0.5) * 3 // bullets curve sideways
+  });
+}
+
+function resetGame() {
+  score = 0;
+  gameOver = false;
+  win = false;
+  player.x = 250;
+  player.vx = 0;
+  bullets = [];
+  enemyBullets = [];
+  initEnemies();
+}
+
+function update() {
+  if (gameOver) return;
+  frame++;
+
+  // Ice-physics movement
+  if (keys['ArrowLeft'] || keys['KeyA']) player.vx -= 0.6;
+  if (keys['ArrowRight'] || keys['KeyD']) player.vx += 0.6;
+  player.vx *= 0.92;
+  player.x += player.vx;
+
+  // Bounce off walls
+  if (player.x < 0) { player.x = 0; player.vx *= -1; }
+  if (player.x > canvas.width - player.w) { player.x = canvas.width - player.w; player.vx *= -1; }
+
+  // Drunk bullets
+  bullets.forEach(b => {
+    b.y -= 5;
+    b.x += b.drift;
+  });
+  bullets = bullets.filter(b => b.y > 0);
+
+  // Jittery enemy movement
+  let hitEdge = false;
+  const alive = enemies.filter(e => e.alive);
+  alive.forEach(e => {
+    e.x += (1.3 * enemyDir) + Math.sin(frame * 0.2) * 1.5;
+    if (e.x + e.w >= canvas.width - 5 || e.x <= 5) hitEdge = true;
+  });
+
+  if (hitEdge) {
+    enemyDir *= -1;
+    alive.forEach(e => e.y += 22);
+  }
+
+  // Enemies throw poop emojis
+  if (Math.random() < 0.025 && alive.length > 0) {
+    const s = alive[Math.floor(Math.random() * alive.length)];
+    enemyBullets.push({ x: s.x + 15, y: s.y + 20 });
+  }
+  enemyBullets.forEach(b => b.y += 3.5);
+  enemyBullets = enemyBullets.filter(b => b.y < canvas.height);
+
+  // Hit detection
+  bullets.forEach((b, bi) => {
+    alive.forEach(e => {
+      if (b.x > e.x && b.x < e.x + e.w && b.y > e.y && b.y < e.y + e.h) {
+        e.alive = false;
+        bullets.splice(bi, 1);
+        score += 7; // weird scoring
+        badSound(140, 'sawtooth', 0.25);
+      }
+    });
+  });
+
+  enemyBullets.forEach(b => {
+    if (b.x > player.x && b.x < player.x + player.w && b.y > player.y && b.y < player.y + player.h) {
+      gameOver = true;
+      badSound(80, 'sawtooth', 0.6);
+    }
+  });
+
+  alive.forEach(e => {
+    if (e.y + e.h >= player.y) gameOver = true;
+  });
+
+  if (alive.length === 0) {
+    gameOver = true;
+    win = true;
+  }
+}
+
+function draw() {
+  ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+  // Ugly score
+  ctx.fillStyle = '#00ffff';
+  ctx.font = '20px Comic Sans MS';
+  ctx.fillText(`Points??: ${score}`, 12, 28);
+
+  // Bootleg player ship (a lopsided triangle)
+  ctx.fillStyle = '#00ff00';
+  ctx.beginPath();
+  ctx.moveTo(player.x + 22, player.y - 10);
+  ctx.lineTo(player.x + player.w, player.y + player.h);
+  ctx.lineTo(player.x, player.y + player.h - 4);
+  ctx.closePath();
+  ctx.fill();
+
+  // Badly drawn enemies
+  enemies.forEach(e => {
+    if (!e.alive) return;
+    ctx.fillStyle = '#ff66cc';
+    ctx.fillRect(e.x, e.y, e.w, e.h);
+    ctx.fillStyle = '#000';
+    ctx.font = '14px Comic Sans MS';
+    ctx.fillText(e.face, e.x + 5, e.y + 18);
+  });
+
+  // Crooked lasers
+  ctx.strokeStyle = '#ffff00';
+  ctx.lineWidth = 4;
+  bullets.forEach(b => {
+    ctx.beginPath();
+    ctx.moveTo(b.x, b.y);
+    ctx.lineTo(b.x - b.drift * 3, b.y + 14);
+    ctx.stroke();
+  });
+
+  // Enemy projectiles
+  ctx.font = '18px Arial';
+  enemyBullets.forEach(b => {
+    ctx.fillText('💩', b.x - 8, b.y);
+  });
+
+  if (gameOver) {
+    ctx.fillStyle = 'rgba(255, 0, 255, 0.8)';
+    ctx.fillRect(40, 140, 470, 160);
+    ctx.fillStyle = '#ffff00';
+    ctx.font = '34px Comic Sans MS';
+    ctx.textAlign = 'center';
+    ctx.fillText(win ? 'u did it i guess' : 'U DIED LOL', canvas.width / 2, 205);
+    ctx.font = '18px Comic Sans MS';
+    ctx.fillText('smash R to suffer again', canvas.width / 2, 255);
+    ctx.textAlign = 'left';
+  }
+}
+
+function loop() {
+  update();
+  draw();
+  requestAnimationFrame(loop);
+}
+
+initEnemies();
+loop();
+</script>
+</body>
+</html>
